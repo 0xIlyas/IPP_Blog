@@ -1,7 +1,7 @@
 import { Button, TextField } from "@mui/material";
 import React, { useState, useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { createBlog } from "slices/dbSlice";
+import { createBlog, setSyncFlag } from "slices/dbSlice";
 import { AppDispatch } from "slices/store";
 import { NotificationManager } from "./Notification";
 import { v4 as uuidv4 } from "uuid";
@@ -11,7 +11,8 @@ import { Controlled as CodeMirror } from "react-codemirror2";
 import "codemirror/lib/codemirror.css";
 import "codemirror/theme/material.css";
 import "codemirror/mode/markdown/markdown";
-import { removeHtmlTags } from "utils/helper";
+import { getStorageItem, removeHtmlTags } from "utils/helper";
+import config from "utils/config";
 
 interface INewBlog {}
 
@@ -24,16 +25,20 @@ const NewBlog = (props: INewBlog) => {
 
   const [title, setTitle] = useState<string>("");
   const [body, setBody] = useState<string>("");
+  const [touched, setTouched] = useState(false);
 
-  const {uuid} = useParams();
+  const { uuid } = useParams();
   const blogs = useSelector<any, IBlog[]>((state) => state.db.Blogs);
   const [curBlog, setCurBlog] = useState<IBlog | undefined>(undefined);
+  const {ipnsCid} = useParams();
 
   useEffect(() => {
-    const blog1 = blogs.find((b) => b.UUID === uuid);
-    setCurBlog(blog1);
-    setTitle(blog1?.Title || "");
-    setBody(blog1?.Body || "");
+    if (!touched) {
+      const blog1 = blogs.find((b) => b.UUID === uuid);
+      setCurBlog(blog1);
+      setTitle(blog1?.Title || "");
+      setBody(blog1?.Body || "");
+    }
   }, [blogs, uuid]);
 
   const onCreate = () => {
@@ -46,36 +51,44 @@ const NewBlog = (props: INewBlog) => {
       NotificationManager.warning("Please input the title", "Warn");
       return;
     }
-    
+
     if (!removeHtmlTags(body)) {
       NotificationManager.warning("Please input the text", "Warn");
       return;
     }
 
     dispatch(setLoading(true));
+    const myIpnsCid = getStorageItem(config.IPNS_DATA + account, "");
     const blog: IBlog = {
       Type: uuid ? "UPDATE_BLOG" : "ADD_BLOG",
       UUID: curBlog?.UUID || uuidv4(),
       Title: title,
       Body: body,
       Creator: account.toLowerCase(),
-      BodyCID: ''
+      BodyCID: "",
     };
 
-    dispatch(createBlog(blog))
+    dispatch(createBlog({blog, ipnsCid: myIpnsCid}))
       .unwrap()
       .then((blog) => {
         // handle result here
-        NotificationManager.success(`"${blog.Title}" ${uuid ? "Updated" : "Created"}`, "Blog Created");
-        navigate("/main");
-        console.log({ blog });
+        NotificationManager.success(
+          `"${blog.Title}" ${uuid ? "Updated" : "Created"}`,
+          "Blog Created"
+        );
+        navigate(`/main/${ipnsCid}`);
         dispatch(setLoading(false));
+        dispatch(setSyncFlag());
       })
       .catch((rejectedValueOrSerializedError) => {
         // handle error here
-        console.log({ rejectedValueOrSerializedError });
+        console.error({ rejectedValueOrSerializedError });
         dispatch(setLoading(false));
       });
+  };
+
+  const onClose = () => {
+    navigate("/main/blogs/" + uuid);
   };
 
   return (
@@ -84,7 +97,10 @@ const NewBlog = (props: INewBlog) => {
         className="title"
         type="text"
         placeholder="Title"
-        onChange={(e: any) => setTitle(e.target.value)}
+        onChange={(e: any) => {
+          setTitle(e.target.value);
+          setTouched(true);
+        }}
         value={title}
       />
       {/* <MediumEditor
@@ -95,18 +111,24 @@ const NewBlog = (props: INewBlog) => {
         value={body}
         options={{
           lineNumbers: true,
-          mode: 'markdown'
+          mode: "markdown",
         }}
         onBeforeChange={(editor, data, value) => {
           setBody(value);
+          setTouched(true);
         }}
         onChange={(editor, data, value) => {}}
         className="newblog-editor"
       />
       <div className="submit">
-        <Button variant="contained" color="success" onClick={onCreate}>
+        <Button variant="contained" color="success" onClick={onCreate} disabled={!touched}>
           {uuid ? "Update" : "Publish"}
         </Button>
+        {uuid && (
+          <Button variant="outlined" color="info" onClick={onClose}>
+            Close
+          </Button>
+        )}
       </div>
     </div>
   );
